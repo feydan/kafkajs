@@ -150,6 +150,15 @@ await admin.resetOffsets({ groupId, topic }) // latest by default
 // await admin.resetOffsets({ groupId, topic, earliest: true })
 ```
 
+## <a name="reset-offsets-by-timestamp"></a> Reset consumer group offsets by timestamp
+
+`resetOffsetsByTimestamp` resets the consumer group's offsets on each partition to the earliest offset whose timestamp is greater than or equal to the given timestamp.
+The consumer group must have no running instances when performing the reset. Otherwise, the command will be rejected.
+
+```javascript
+await admin.resetOffsetsByTimestamp({ groupId, topic, timestamp })
+```
+
 ## <a name="set-offsets"></a> Set consumer group offsets
 
 `setOffsets` allows you to set the consumer group offset to any value.

@@ -1,11 +1,15 @@
 const createAdmin = require('../index')
 const createProducer = require('../../producer')
+const createConsumer = require('../../consumer')
+
 const {
   secureRandom,
   createCluster,
   newLogger,
   createTopic,
   createModPartitioner,
+  waitFor,
+  waitForConsumerToJoinGroup,
 } = require('testHelpers')
 
 describe('Admin', () => {
@@ -38,11 +42,11 @@ describe('Admin', () => {
       )
     })
 
-    test('returns the current topic offset', async () => {
+    const sendMessages = async n => {
       await admin.connect()
       await producer.connect()
 
-      const messages = Array(100)
+      const messages = Array(n)
         .fill()
         .map(() => {
           const value = secureRandom()
@@ -50,9 +54,54 @@ describe('Admin', () => {
         })
 
       await producer.send({ acks: 1, topic: topicName, messages })
-      const offsets = await admin.fetchTopicOffsets(topicName)
+    }
 
+    test('returns the current topic offset', async () => {
+      await sendMessages(100)
+      const offsets = await admin.fetchTopicOffsets(topicName)
       expect(offsets).toEqual([{ partition: 0, offset: '100', low: '0', high: '100' }])
+    })
+
+    test('returns the offsets from timestamp', async () => {
+      await sendMessages(10)
+      const fromTimestamp = Date.now()
+      await sendMessages(10)
+      const futureTimestamp = Date.now()
+      const offsetsFromTimestamp = await admin.fetchTopicOffsets(topicName, fromTimestamp)
+      expect(offsetsFromTimestamp).toEqual([{ partition: 0, offset: '10' }])
+      const offsetsFutureTimestamp = await admin.fetchTopicOffsets(topicName, futureTimestamp)
+      expect(offsetsFutureTimestamp).toEqual([{ partition: 0, offset: '20' }])
+      const groupId = `consumer-group-id-${secureRandom()}`
+      const consumer = createConsumer({
+        cluster,
+        groupId,
+        maxWaitTimeInMs: 1,
+        maxBytesPerPartition: 180,
+        logger: newLogger(),
+      })
+      await consumer.connect()
+      await consumer.subscribe({ topic: topicName, fromBeginning: true })
+      /** real timestamp in messages after `fromTimestamp` */
+      let realTimestamp = 0
+      consumer.run({
+        eachMessage: async ({ message }) => {
+          if (message.timestamp < fromTimestamp) return
+          if (realTimestamp === 0) realTimestamp = message.timestamp
+          if (realTimestamp > 0) consumer.stop()
+        },
+      })
+      await waitForConsumerToJoinGroup(consumer)
+      await waitFor(() => realTimestamp > 0)
+      const offsetsRealTimestamp = await admin.fetchTopicOffsets(topicName, realTimestamp)
+      expect(offsetsRealTimestamp).toEqual([{ partition: 0, offset: '10' }])
+    })
+
+    test('returns the offsets from timestamp when no messages', async () => {
+      const fromTimestamp = Date.now()
+      const offsetsFromTimestamp = await admin.fetchTopicOffsets(topicName, fromTimestamp)
+      expect(offsetsFromTimestamp).toEqual([{ partition: 0, offset: '0' }])
+      const offsets = await admin.fetchTopicOffsets(topicName)
+      expect(offsets).toEqual([{ partition: 0, offset: '0', low: '0', high: '0' }])
     })
   })
 })

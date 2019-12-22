@@ -21,7 +21,7 @@ describe('Admin', () => {
   describe('resetOffsets', () => {
     test('throws an error if the groupId is invalid', async () => {
       admin = createAdmin({ cluster: createCluster(), logger: newLogger() })
-      await expect(admin.setOffsets({ groupId: null })).rejects.toHaveProperty(
+      await expect(admin.resetOffsets({ groupId: null })).rejects.toHaveProperty(
         'message',
         'Invalid groupId null'
       )
@@ -29,7 +29,7 @@ describe('Admin', () => {
 
     test('throws an error if the topic name is not a valid string', async () => {
       admin = createAdmin({ cluster: createCluster(), logger: newLogger() })
-      await expect(admin.setOffsets({ groupId: 'groupId', topic: null })).rejects.toHaveProperty(
+      await expect(admin.resetOffsets({ groupId: 'groupId', topic: null })).rejects.toHaveProperty(
         'message',
         'Invalid topic null'
       )

@@ -136,7 +136,8 @@ export type Cluster = {
     topics: Array<{
       topic: string
       partitions: Array<{ partition: number }>
-      fromBeginning: boolean
+      fromBeginning?: boolean
+      fromTimestamp?: number
     }>
   ): Promise<{ topic: string; partitions: Array<{ partition: number; offset: string }> }>
 }
@@ -303,10 +304,12 @@ export type Admin = {
     topic: string
   }): Promise<Array<{ partition: number; offset: string; metadata: string | null }>>
   fetchTopicOffsets(
-    topic: string
+    topic: string,
+    fromTimestamp?: number
   ): Promise<Array<{ partition: number; offset: string; high: string; low: string }>>
   setOffsets(options: { groupId: string; topic: string; partitions: SeekEntry[] }): Promise<void>
   resetOffsets(options: { groupId: string; topic: string; earliest: boolean }): Promise<void>
+  resetOffsetsByTimestamp(options: { groupId: string; topic: string; timestamp: number }): Promise<void>
   describeConfigs(configs: {
     resources: ResourceConfigQuery[]
     includeSynonyms: boolean
