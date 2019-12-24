@@ -309,7 +309,6 @@ export type Admin = {
   ): Promise<Array<{ partition: number; offset: string; high: string; low: string }>>
   setOffsets(options: { groupId: string; topic: string; partitions: SeekEntry[] }): Promise<void>
   resetOffsets(options: { groupId: string; topic: string; earliest: boolean }): Promise<void>
-  resetOffsetsByTimestamp(options: { groupId: string; topic: string; timestamp: number }): Promise<void>
   describeConfigs(configs: {
     resources: ResourceConfigQuery[]
     includeSynonyms: boolean

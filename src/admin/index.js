@@ -310,30 +310,6 @@ module.exports = ({
   /**
    * @param {string} groupId
    * @param {string} topic
-   * @param {number} timestamp
-   * @return {Promise}
-   */
-  const resetOffsetsByTimestamp = async ({ groupId, topic, timestamp }) => {
-    if (!groupId) {
-      throw new KafkaJSNonRetriableError(`Invalid groupId ${groupId}`)
-    }
-
-    if (!topic) {
-      throw new KafkaJSNonRetriableError(`Invalid topic ${topic}`)
-    }
-
-    if (timestamp == null || !(timestamp >= 0)) {
-      throw new KafkaJSNonRetriableError(`Invalid timestamp ${timestamp}`)
-    }
-
-    const partitions = await fetchTopicOffsets(topic, timestamp)
-
-    return setOffsets({ groupId, topic, partitions })
-  }
-
-  /**
-   * @param {string} groupId
-   * @param {string} topic
    * @param {Array<SeekEntry>} partitions
    * @return {Promise}
    *
@@ -679,7 +655,6 @@ module.exports = ({
     fetchTopicOffsets,
     setOffsets,
     resetOffsets,
-    resetOffsetsByTimestamp,
     describeConfigs,
     alterConfigs,
     on,

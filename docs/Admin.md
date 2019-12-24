@@ -115,6 +115,7 @@ await admin.fetchTopicMetadata()
 ## <a name="fetch-topic-offsets"></a> Fetch topic offsets
 
 `fetchTopicOffsets` returns most recent offset for a topic.
+You can specify a `timestamp` to get the earliest offset on each partition where the message's timestamp is greater than or equal to the given timestamp.
 
 ```javascript
 await admin.fetchTopicOffsets(topic)
@@ -123,6 +124,12 @@ await admin.fetchTopicOffsets(topic)
 //   { partition: 1, offset: '54312', high: '54312', low: '3102' },
 //   { partition: 2, offset: '32103', high: '32103', low: '518' },
 //   { partition: 3, offset: '28', high: '28', low: '0' },
+// ]
+
+await admin.fetchTopicOffsets(topic, timestamp)
+// [
+//   { partition: 0, offset: '3244' },
+//   { partition: 1, offset: '3113' },
 // ]
 ```
 
@@ -148,15 +155,6 @@ The consumer group must have no running instances when performing the reset. Oth
 ```javascript
 await admin.resetOffsets({ groupId, topic }) // latest by default
 // await admin.resetOffsets({ groupId, topic, earliest: true })
-```
-
-## <a name="reset-offsets-by-timestamp"></a> Reset consumer group offsets by timestamp
-
-`resetOffsetsByTimestamp` resets the consumer group's offsets on each partition to the earliest offset whose timestamp is greater than or equal to the given timestamp.
-The consumer group must have no running instances when performing the reset. Otherwise, the command will be rejected.
-
-```javascript
-await admin.resetOffsetsByTimestamp({ groupId, topic, timestamp })
 ```
 
 ## <a name="set-offsets"></a> Set consumer group offsets
@@ -191,6 +189,15 @@ await admin.setOffsets({
         { partition: 3, offset: '19' },
     ]
 })
+```
+
+## <a name="reset-offsets-by-timestamp"></a> Reset consumer group offsets by timestamp
+
+Combine `fetchTopicOffsets` and `setOffsets` can reset a consumer group's offsets on each partition to the earliest offset whose timestamp is greater than or equal to the given timestamp.
+The consumer group must have no running instances when performing the reset. Otherwise, the command will be rejected.
+
+```javascript
+await admin.setOffsets({ groupId, topic, partitions: await admin.fetchTopicOffsets(topic, timestamp) })
 ```
 
 ## <a name="describe-configs"></a> Describe configs
