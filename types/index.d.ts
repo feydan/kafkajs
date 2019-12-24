@@ -251,6 +251,8 @@ export interface InstrumentationEvent<T> {
   payload: T
 }
 
+export type RemoveInstrumentationEventListener<T> = () => void
+
 export type ConnectEvent = InstrumentationEvent<null>
 export type DisconnectEvent = InstrumentationEvent<null>
 export type RequestEvent = InstrumentationEvent<{
@@ -315,7 +317,10 @@ export type Admin = {
   }): Promise<DescribeConfigResponse>
   alterConfigs(configs: { validateOnly: boolean; resources: IResourceConfig[] }): Promise<any>
   logger(): Logger
-  on(eventName: ValueOf<AdminEvents>, listener: (...args: any[]) => void): void
+  on(
+    eventName: ValueOf<AdminEvents>,
+    listener: (...args: any[]) => void
+  ): RemoveInstrumentationEventListener<typeof eventName>
   events: AdminEvents
 }
 
@@ -424,10 +429,10 @@ export interface TopicMessages {
 }
 
 export interface ProducerBatch {
-  acks: number
-  timeout: number
-  compression: CompressionTypes
-  topicMessages: TopicMessages[]
+  acks?: number
+  timeout?: number
+  compression?: CompressionTypes
+  topicMessages?: TopicMessages[]
 }
 
 export interface PartitionOffset {
@@ -462,7 +467,10 @@ export type Producer = Sender & {
   disconnect(): Promise<void>
   isIdempotent(): boolean
   events: ProducerEvents
-  on(eventName: ValueOf<ProducerEvents>, listener: (...args: any[]) => void): void
+  on(
+    eventName: ValueOf<ProducerEvents>,
+    listener: (...args: any[]) => void
+  ): RemoveInstrumentationEventListener<typeof eventName>
   transaction(): Promise<Transaction>
   logger(): Logger
 }
@@ -636,7 +644,10 @@ export type Consumer = {
   pause(topics: Array<{ topic: string; partitions?: number[] }>): void
   paused(): TopicPartitions[]
   resume(topics: Array<{ topic: string; partitions?: number[] }>): void
-  on(eventName: ValueOf<ConsumerEvents>, listener: (...args: any[]) => void): void
+  on(
+    eventName: ValueOf<ConsumerEvents>,
+    listener: (...args: any[]) => void
+  ): RemoveInstrumentationEventListener<typeof eventName>
   logger(): Logger
   events: ConsumerEvents
 }
