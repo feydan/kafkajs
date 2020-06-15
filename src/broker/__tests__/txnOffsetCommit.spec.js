@@ -92,17 +92,24 @@ describe('Broker > TxnOffsetCommit', () => {
       topics: [
         {
           topic: topicName,
-          partitions: [{ partition: 0, offset: 0 }, { partition: 1, offset: 0 }],
+          partitions: [
+            { partition: 0, offset: 0 },
+            { partition: 1, offset: 0 },
+          ],
         },
       ],
     })
 
+    result.topics.forEach(topic => topic.partitions.sort((p1, p2) => p1.partition - p2.partition))
     expect(result).toEqual({
       throttleTime: 0,
       topics: [
         {
           topic: topicName,
-          partitions: [{ errorCode: 0, partition: 0 }, { errorCode: 0, partition: 1 }],
+          partitions: [
+            { errorCode: 0, partition: 0 },
+            { errorCode: 0, partition: 1 },
+          ],
         },
       ],
     })
@@ -117,7 +124,10 @@ describe('Broker > TxnOffsetCommit', () => {
       topics: [
         {
           topic: topicName,
-          partitions: [{ partition: 0, offset: 0 }, { partition: 1, offset: 0 }],
+          partitions: [
+            { partition: 0, offset: 0 },
+            { partition: 1, offset: 0 },
+          ],
         },
       ],
     })

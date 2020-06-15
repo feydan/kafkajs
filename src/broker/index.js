@@ -506,6 +506,27 @@ module.exports = class Broker {
 
   /**
    * @public
+   * @param {Array} topicPartitions e.g:
+   *                 [
+   *                   {
+   *                     topic: 'topic-name',
+   *                     count: 3,
+   *                     assignments: []
+   *                   }
+   *                 ]
+   * @param {boolean} [validateOnly=false] If this is true, the request will be validated, but the topic
+   *                                       won't be created
+   * @param {number} [timeout=5000] The time in ms to wait for a topic to be completely created
+   *                                on the controller node
+   * @returns {Promise<void>}
+   */
+  async createPartitions({ topicPartitions, validateOnly = false, timeout = 5000 }) {
+    const createPartitions = this.lookupRequest(apiKeys.CreatePartitions, requests.CreatePartitions)
+    return await this.connection.send(createPartitions({ topicPartitions, validateOnly, timeout }))
+  }
+
+  /**
+   * @public
    * @param {Array<string>} topics An array of topics to be deleted
    * @param {number} [timeout=5000] The time in ms to wait for a topic to be completely deleted on the
    *                                controller node. Values <= 0 will trigger topic deletion and return
@@ -659,6 +680,27 @@ module.exports = class Broker {
     return await this.connection.send(
       endTxn({ transactionalId, producerId, producerEpoch, transactionResult })
     )
+  }
+
+  /**
+   * Send request for list of groups
+   * @public
+   * @returns {Promise}
+   */
+  async listGroups() {
+    const listGroups = this.lookupRequest(apiKeys.ListGroups, requests.ListGroups)
+    return await this.connection.send(listGroups())
+  }
+
+  /**
+   * Send request to delete groups
+   * @param {Array<string>} groupIds
+   * @public
+   * @returns {Promise}
+   */
+  async deleteGroups(groupIds) {
+    const deleteGroups = this.lookupRequest(apiKeys.DeleteGroups, requests.DeleteGroups)
+    return await this.connection.send(deleteGroups(groupIds))
   }
 
   /***

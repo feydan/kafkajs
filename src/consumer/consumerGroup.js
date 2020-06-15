@@ -1,13 +1,15 @@
 const flatten = require('../utils/flatten')
 const sleep = require('../utils/sleep')
+const BufferedAsyncIterator = require('../utils/bufferedAsyncIterator')
 const websiteUrl = require('../utils/websiteUrl')
 const arrayDiff = require('../utils/arrayDiff')
+
 const OffsetManager = require('./offsetManager')
 const Batch = require('./batch')
 const SeekOffsets = require('./seekOffsets')
 const SubscriptionState = require('./subscriptionState')
 const {
-  events: { HEARTBEAT },
+  events: { HEARTBEAT, CONNECT },
 } = require('./instrumentationEvents')
 const { MemberAssignment } = require('./assignerProtocol')
 const {
@@ -82,6 +84,7 @@ module.exports = class ConsumerGroup {
 
   async connect() {
     await this.cluster.connect()
+    this.instrumentationEmitter.emit(CONNECT)
     await this.cluster.refreshMetadataIfNecessary()
   }
 
@@ -95,7 +98,11 @@ module.exports = class ConsumerGroup {
       sessionTimeout,
       rebalanceTimeout,
       memberId: this.memberId || '',
-      groupProtocols: this.assigners.map(assigner => assigner.protocol({ topics: this.topics })),
+      groupProtocols: this.assigners.map(assigner =>
+        assigner.protocol({
+          topics: this.topicsSubscribed,
+        })
+      ),
     })
 
     this.generationId = groupData.generationId
@@ -210,7 +217,7 @@ module.exports = class ConsumerGroup {
           assignedPartitions,
         })
 
-        // If the consumer is not aware of all assigned partions, refresh metadata
+        // If the consumer is not aware of all assigned partitions, refresh metadata
         // and update the list of partitions per subscribed topic. It's enough to perform
         // this operation once since refresh metadata will update metadata for all topics
         await this.cluster.refreshMetadata()
@@ -347,7 +354,7 @@ module.exports = class ConsumerGroup {
         })
 
         await sleep(this.maxWaitTime)
-        return []
+        return BufferedAsyncIterator([])
       }
 
       await this.offsetManager.resolveOffsets()
@@ -457,48 +464,51 @@ module.exports = class ConsumerGroup {
       // configured max wait time
       if (requests.length === 0) {
         await sleep(this.maxWaitTime)
-        return []
+        return BufferedAsyncIterator([])
       }
 
-      const results = await Promise.all(requests)
-      return flatten(results)
+      return BufferedAsyncIterator(requests, e => this.recoverFromFetch(e))
     } catch (e) {
-      if (STALE_METADATA_ERRORS.includes(e.type) || e.name === 'KafkaJSTopicMetadataNotLoaded') {
-        this.logger.debug('Stale cluster metadata, refreshing...', {
-          groupId: this.groupId,
-          memberId: this.memberId,
-          error: e.message,
-        })
-
-        await this.cluster.refreshMetadata()
-        await this.join()
-        await this.sync()
-        throw new KafkaJSError(e.message)
-      }
-
-      if (e.name === 'KafkaJSStaleTopicMetadataAssignment') {
-        this.logger.warn(`${e.message}, resync group`, {
-          groupId: this.groupId,
-          memberId: this.memberId,
-          topic: e.topic,
-          unknownPartitions: e.unknownPartitions,
-        })
-
-        await this.join()
-        await this.sync()
-      }
-
-      if (e.name === 'KafkaJSOffsetOutOfRange') {
-        await this.recoverFromOffsetOutOfRange(e)
-      }
-
-      if (e.name === 'KafkaJSBrokerNotFound') {
-        this.logger.debug(`${e.message}, refreshing metadata and retrying...`)
-        await this.cluster.refreshMetadata()
-      }
-
-      throw e
+      await this.recoverFromFetch(e)
     }
+  }
+
+  async recoverFromFetch(e) {
+    if (STALE_METADATA_ERRORS.includes(e.type) || e.name === 'KafkaJSTopicMetadataNotLoaded') {
+      this.logger.debug('Stale cluster metadata, refreshing...', {
+        groupId: this.groupId,
+        memberId: this.memberId,
+        error: e.message,
+      })
+
+      await this.cluster.refreshMetadata()
+      await this.join()
+      await this.sync()
+      throw new KafkaJSError(e.message)
+    }
+
+    if (e.name === 'KafkaJSStaleTopicMetadataAssignment') {
+      this.logger.warn(`${e.message}, resync group`, {
+        groupId: this.groupId,
+        memberId: this.memberId,
+        topic: e.topic,
+        unknownPartitions: e.unknownPartitions,
+      })
+
+      await this.join()
+      await this.sync()
+    }
+
+    if (e.name === 'KafkaJSOffsetOutOfRange') {
+      await this.recoverFromOffsetOutOfRange(e)
+    }
+
+    if (e.name === 'KafkaJSBrokerNotFound') {
+      this.logger.debug(`${e.message}, refreshing metadata and retrying...`)
+      await this.cluster.refreshMetadata()
+    }
+
+    throw e
   }
 
   async recoverFromOffsetOutOfRange(e) {

@@ -1,7 +1,10 @@
+const EventEmitter = require('events')
 const Long = require('long')
 const createRetry = require('../retry')
 const limitConcurrency = require('../utils/concurrency')
 const { KafkaJSError } = require('../errors')
+const barrier = require('./barrier')
+
 const {
   events: { GROUP_JOIN, FETCH, FETCH_START, START_BATCH_PROCESS, END_BATCH_PROCESS },
 } = require('./instrumentationEvents')
@@ -13,8 +16,10 @@ const isRebalancing = e =>
 
 const isKafkaJSError = e => e instanceof KafkaJSError
 const isSameOffset = (offsetA, offsetB) => Long.fromValue(offsetA).equals(Long.fromValue(offsetB))
+const CONSUMING_START = 'consuming-start'
+const CONSUMING_STOP = 'consuming-stop'
 
-module.exports = class Runner {
+module.exports = class Runner extends EventEmitter {
   constructor({
     logger,
     consumerGroup,
@@ -28,6 +33,7 @@ module.exports = class Runner {
     retry,
     autoCommit = true,
   }) {
+    super()
     this.logger = logger.namespace('Runner')
     this.consumerGroup = consumerGroup
     this.instrumentationEmitter = instrumentationEmitter
@@ -42,6 +48,17 @@ module.exports = class Runner {
 
     this.running = false
     this.consuming = false
+  }
+
+  get consuming() {
+    return this._consuming
+  }
+
+  set consuming(value) {
+    if (this._consuming !== value) {
+      this._consuming = value
+      this.emit(value ? CONSUMING_START : CONSUMING_STOP)
+    }
   }
 
   async join() {
@@ -133,20 +150,14 @@ module.exports = class Runner {
 
   waitForConsumer() {
     return new Promise(resolve => {
-      const scheduleWait = () => {
-        this.logger.debug('waiting for consumer to finish...', {
-          groupId: this.consumerGroup.groupId,
-          memberId: this.consumerGroup.memberId,
-        })
-
-        setTimeout(() => (!this.consuming ? resolve() : scheduleWait()), 1000)
-      }
-
       if (!this.consuming) {
         return resolve()
       }
-
-      scheduleWait()
+      this.logger.debug('waiting for consumer to finish...', {
+        groupId: this.consumerGroup.groupId,
+        memberId: this.consumerGroup.memberId,
+      })
+      this.once(CONSUMING_STOP, () => resolve())
     })
   }
 
@@ -255,10 +266,18 @@ module.exports = class Runner {
 
     this.instrumentationEmitter.emit(FETCH_START, {})
 
-    const batches = await this.consumerGroup.fetch()
+    const iterator = await this.consumerGroup.fetch()
 
     this.instrumentationEmitter.emit(FETCH, {
-      numberOfBatches: batches.length,
+      /**
+       * PR #570 removed support for the number of batches in this instrumentation event;
+       * The new implementation uses an async generation to deliver the batches, which makes
+       * this number impossible to get. The number is set to 0 to keep the event backward
+       * compatible until we bump KafkaJS to version 2, following the end of node 8 LTS.
+       *
+       * @since 2019-11-29
+       */
+      numberOfBatches: 0,
       duration: Date.now() - startFetch,
     })
 
@@ -297,21 +316,73 @@ module.exports = class Runner {
     }
 
     const concurrently = limitConcurrency({ limit: this.partitionsConsumedConcurrently })
-    await Promise.all(
-      batches.map(batch =>
-        concurrently(async () => {
-          if (!this.running) {
-            return
-          }
 
-          if (batch.isEmpty()) {
-            return
-          }
+    if (!this.running) {
+      return
+    }
 
-          await onBatch(batch)
-        })
-      )
-    )
+    const { lock, unlock, unlockWithError } = barrier()
+
+    let requestsCompleted = false
+    let numberOfExecutions = 0
+    let expectedNumberOfExecutions = 0
+    const enqueuedTasks = []
+
+    while (true) {
+      const result = iterator.next()
+      if (result.done) {
+        break
+      }
+
+      enqueuedTasks.push(async () => {
+        if (!this.running) {
+          return
+        }
+
+        const batches = await result.value
+        expectedNumberOfExecutions += batches.length
+
+        batches.map(batch =>
+          concurrently(async () => {
+            try {
+              if (!this.running) {
+                return
+              }
+
+              if (batch.isEmpty()) {
+                return
+              }
+
+              await onBatch(batch)
+              await this.consumerGroup.heartbeat({ interval: this.heartbeatInterval })
+            } catch (e) {
+              unlockWithError(e)
+            } finally {
+              numberOfExecutions++
+              if (requestsCompleted && numberOfExecutions === expectedNumberOfExecutions) {
+                unlock()
+              }
+            }
+          }).catch(unlockWithError)
+        )
+      })
+    }
+
+    if (!this.running) {
+      return
+    }
+
+    await Promise.all(enqueuedTasks.map(fn => fn()))
+    requestsCompleted = true
+
+    if (expectedNumberOfExecutions === numberOfExecutions) {
+      unlock()
+    }
+
+    const error = await lock
+    if (error) {
+      throw error
+    }
 
     await this.autoCommitOffsets()
     await this.consumerGroup.heartbeat({ interval: this.heartbeatInterval })
@@ -352,7 +423,7 @@ module.exports = class Runner {
           })
 
           await this.join()
-          this.scheduleFetch()
+          setImmediate(() => this.scheduleFetch())
           return
         }
 
@@ -367,12 +438,12 @@ module.exports = class Runner {
 
           this.consumerGroup.memberId = null
           await this.join()
-          this.scheduleFetch()
+          setImmediate(() => this.scheduleFetch())
           return
         }
 
         if (e.name === 'KafkaJSOffsetOutOfRange') {
-          this.scheduleFetch()
+          setImmediate(() => this.scheduleFetch())
           return
         }
 

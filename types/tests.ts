@@ -8,6 +8,15 @@ import {
   CompressionCodecs,
   ResourceTypes,
   LogEntry,
+  KafkaJSError,
+  KafkaJSOffsetOutOfRange,
+  KafkaJSNumberOfRetriesExceeded,
+  KafkaJSConnectionError,
+  KafkaJSRequestTimeoutError,
+  KafkaJSTopicMetadataNotLoaded,
+  KafkaJSStaleTopicMetadataAssignment,
+  PartitionMetadata,
+  KafkaJSServerDoesNotSupportApiKey,
 } from './index'
 
 const { roundRobin } = PartitionAssigners
@@ -29,11 +38,14 @@ const kafka = new Kafka({
     username: 'test',
     password: 'testtest',
   },
-  logCreator: (logLevel: logLevel) => (entry: LogEntry) => {},
+  logCreator: (logLevel: logLevel) => (entry: LogEntry) => { },
 })
+
+kafka.logger().error('Instantiated KafkaJS')
 
 // CONSUMER
 const consumer = kafka.consumer({ groupId: 'test-group' })
+consumer.logger().info('Instantiated logger', { groupId: 'test-group' })
 
 let removeListener = consumer.on(consumer.events.HEARTBEAT, e =>
   console.log(`heartbeat at ${e.timestamp}`)
@@ -100,6 +112,7 @@ runConsumer().catch(console.error)
 
 // PRODUCER
 const producer = kafka.producer({ allowAutoTopicCreation: true })
+producer.logger().debug('Instantiated producer')
 
 removeListener = producer.on(producer.events.CONNECT, e =>
   console.log(`Producer connect at ${e.timestamp}`)
@@ -135,17 +148,32 @@ runProducer().catch(console.error)
 
 // ADMIN
 const admin = kafka.admin({ retry: { retries: 10 } })
+admin.logger().warn('Instantiated admin')
 
 removeListener = admin.on(admin.events.CONNECT, e => console.log(`Admin connect at ${e.timestamp}`))
 removeListener()
 
 const runAdmin = async () => {
   await admin.connect()
+
+  const { controller, brokers, clusterId } = await admin.describeCluster()
+  admin.logger().debug('Fetched cluster metadata', {
+    controller,
+    clusterId,
+    brokers: brokers.map(({ nodeId, host, port }) => ({
+      nodeId,
+      host,
+      port
+    }))
+  })
+
   await admin.fetchTopicMetadata({ topics: ['string'] }).then(metadata => {
     metadata.topics.forEach(topic => {
       console.log(topic.name, topic.partitions)
     })
   })
+
+  await admin.listTopics()
 
   await admin.createTopics({
     topics: [{ topic, numPartitions: 10, replicationFactor: 1 }],
@@ -162,6 +190,11 @@ const runAdmin = async () => {
       },
     ],
   })
+
+  const { groups } = await admin.listGroups()
+  const groupIds = groups.map(({ groupId }) => groupId)
+  const groupDescription = await admin.describeGroups(groupIds)
+  await admin.deleteGroups(groupDescription.map(({ groupId }) => groupId))
 
   await admin.disconnect()
 }
@@ -186,3 +219,46 @@ kafka.consumer({
   groupId: 'my-group',
   partitionAssigners: [roundRobin],
 })
+
+// ERROR
+new KafkaJSError('Invalid partition metadata', { retriable: true });
+new KafkaJSError('The group is rebalancing');
+new KafkaJSError(new Error('💣'), { retriable: true });
+
+new KafkaJSOffsetOutOfRange(new Error(), { topic: topic, partition: 0 });
+
+new KafkaJSNumberOfRetriesExceeded(new Error(), { retryCount: 0, retryTime: 0 });
+
+new KafkaJSConnectionError('Connection error: ECONNREFUSED', {
+  broker: `${host}:9094`,
+  code: 'ECONNREFUSED'
+});
+new KafkaJSConnectionError('Connection error: ECONNREFUSED', { code: 'ECONNREFUSED' });
+
+new KafkaJSRequestTimeoutError('Request requestInfo timed out', {
+  broker: `${host}:9094`,
+  clientId: 'example-consumer',
+  correlationId: 0,
+  createdAt: 0,
+  sentAt: 0,
+  pendingDuration: 0
+});
+
+new KafkaJSTopicMetadataNotLoaded('Topic metadata not loaded', { topic: topic });
+
+const partitionMetadata: PartitionMetadata = {
+  partitionErrorCode: 0,
+  partitionId: 0,
+  leader: 2,
+  replicas: [2],
+  isr: [2],
+}
+new KafkaJSStaleTopicMetadataAssignment('Topic has been updated', {
+  topic: topic,
+  unknownPartitions: [partitionMetadata]
+});
+
+new KafkaJSServerDoesNotSupportApiKey('The Kafka server does not support the requested API version', {
+  apiKey: 0,
+  apiName: 'Produce'
+});
